@@ -2,9 +2,12 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <string.h>
+#include <pthread.h>
 #include <glib.h>
 
 #include "grep_impl.h"
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void
 printUsage(const char *progname)
@@ -175,6 +178,115 @@ int main(int argc, char *argv[])
             printUsageShort(argv[0]);
             goto cleanup;
         }
+    }
+
+    grep = GrepInit(recursive, (const char **) argv + optind, argc - optind);
+    if (!grep)
+        goto cleanup;
+
+    data.grep = grep;
+    data.linenumber = linenumber;
+    data.filename = filename;
+    data.error = 0;
+
+    g_slist_foreach(patterns, grepDoHelper, &data);
+
+    if (data.error != 0)
+        goto cleanup;
+
+    ret = EXIT_SUCCESS;
+ cleanup:
+    GrepFree(grep);
+    g_slist_free(patterns);
+    return ret;
+}
+
+
+/* Used for multi-thread */
+int multithread(int argc, char *argv[]) {
+    int ret = EXIT_FAILURE;
+    Grep *grep = NULL;
+    int recursive = 0;
+    int linenumber = 0;
+    int filename = 0;
+    GSList *patterns = NULL;
+    int thrdcount;
+    grepDoHelperData data = { 0 };
+    struct option opts[] = {
+        { "help", no_argument, NULL, 'h' },
+        { "line-number", no_argument, NULL, 'n' },
+        { "with-filename", no_argument, NULL, 'f' },
+        { "no-filename", no_argument, NULL, 'F' },
+        { "recursive", no_argument, NULL, 'r' },
+        { "pattern", required_argument, NULL, 'e' },
+        {0, 0, 0, 0}
+    };
+
+    while (1) {
+        int optidx = 0;
+        int c;
+
+        c = getopt_long(argc, argv, "+hnfFre:", opts, &optidx);
+
+        if (c == -1)
+            break;
+
+        switch (c) {
+        case 'h':
+            printUsage(argv[0]);
+            exit(EXIT_SUCCESS);
+
+        case 'n':
+            linenumber = 1;
+            break;
+
+        case 'f':
+            filename = 1;
+            break;
+
+        case 'F':
+            filename = 2;
+            break;
+
+        case 'r':
+            recursive = 1;
+            break;
+
+        case 'e':
+            patterns = g_slist_prepend(patterns, optarg);
+            break;
+
+        case '?':
+        default:
+            printUsageShort(argv[0]);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    /* Next one is PATTERN. */
+    if (!patterns) {
+        if (optind < argc) {
+            patterns = g_slist_prepend(patterns, argv[optind++]);
+        } else {
+            /* But if none found then it's clearly usage error. */
+            printUsageShort(argv[0]);
+            goto cleanup;
+        }
+    }
+
+    const char **paths = (const char **) argv + optind;
+    for (thrdcount = 0; paths[thrdcount] != NULL; thrdcount++) { }
+    pthread_t *thrds = malloc(sizeof(pthread_t) * thrdcount);
+    for (int i = 0; paths[i] != NULL; i++) {
+        grepInitArgs tmp;
+        tmp.arg1 = recursive;
+        tmp.arg2 = (const char **)paths[i];
+        tmp.arg3 = argc - optind;
+        Grep *grep = malloc(sizeof(Grep *));
+        tmp.grep = grep;
+        grep->next = NULL;
+        pthread_create(&thrds[i], NULL, GrepInitWrapper, &tmp);
+        pthread_join(thrds[i], NULL);
     }
 
     grep = GrepInit(recursive, (const char **) argv + optind, argc - optind);
