@@ -55,11 +55,8 @@ addPaths(GSList *paths,
         goto error;
     }
 
-    GSList *test = NULL;
-
     if (!S_ISDIR(sb.st_mode)) {
         paths = g_slist_prepend(paths, g_strdup(path));
-        test  = g_slist_prepend(test, g_strdup(path));
     } else {
         const char *f;
         if (!recursive) {
@@ -114,7 +111,7 @@ GrepInit(int recursive,
         grep->next = NULL;
         char tmp[2] = "-";
         const char *tmp_path = tmp;
-        addPaths(grep->pathList, tmp_path, tmp_path, recursive);
+        grep->pathList = addPaths(grep->pathList, tmp_path, tmp_path, recursive);
         return grep;
     } else if (*paths == NULL && recursive != 0) {
     /* No path given and recursive == 1, grep cur dir  */
@@ -178,7 +175,7 @@ GrepDo(Grep *grep,
        GrepCallback cb)
 {
     int ret = -1;
-    if (grep) {
+    if (grep && grep->pathList) {
         /* Default behaviour */
         if (!grep->next && !grep->pathList->next && filename != 1) {
             const char *path = grep->pathList->data;
