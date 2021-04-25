@@ -105,11 +105,16 @@ GrepInit(int recursive,
          const char **paths,
          size_t npaths)
 {
+    /* Though npaths = 0, we still have to store a path
+    like '/dev/stdin' or './' */
+    if (npaths == 0) {
+        npaths = 1;
+    }
+    Grep *grep = malloc(sizeof(Grep) * npaths);
+    grep->pathList = NULL;
+    grep->next = NULL;
     /* No path given and recursive != 1, read from stdin */
     if (*paths == NULL && recursive == 0) {
-        Grep *grep = malloc(sizeof(Grep));
-        grep->pathList = NULL;
-        grep->next = NULL;
         GSList **listHead = &grep->pathList;
         char tmp[2] = "-";
         const char *tmp_path = tmp;
@@ -117,9 +122,6 @@ GrepInit(int recursive,
         return grep;
     } else if (*paths == NULL && recursive != 0) {
     /* No path given and recursive == 1, grep cur dir  */
-        Grep *grep = malloc(sizeof(Grep));
-        grep->pathList = NULL;
-        grep->next = NULL;
         GSList **listHead = &grep->pathList;
         char tmp[3] = "./";
         const char *tmp_path = tmp;
@@ -128,9 +130,6 @@ GrepInit(int recursive,
     } else {
     /* Normal situation, for every path given, use a grep
     structure to store the path generated */
-        Grep *grep = malloc(sizeof(Grep) * npaths);
-        grep->next = NULL;
-        grep->pathList = NULL;
         GSList **listHead = &grep->pathList;
         Grep *head = grep;
         for (int i = 0; paths[i] != NULL; i++) {
@@ -180,9 +179,10 @@ GrepDo(Grep *grep,
 {
     int ret = -1;
     if (grep && grep->pathList) {
-        GSList **node = &grep->pathList;
+        Grep **grepNode = &grep;
+        GSList **node = &(*grepNode)->pathList;
         /* Default behaviour */
-        if (!grep->next && !(*node)->next && filename != 1) {
+        if (!(*grepNode)->next && !(*node)->next && filename != 1) {
             const char *path = (*node)->data;
             ret = cb(path, pattern, linenumber, 0);
             return ret;
@@ -190,7 +190,7 @@ GrepDo(Grep *grep,
             /* filename % 2 corresponds to the original
             filename for callback func */
             filename = filename % 2;
-            while (grep) {
+            while (*grepNode) {
                 while(*node) {
                     const char *path = (*node)->data;
                     ret = cb(path, pattern, linenumber, filename);
@@ -199,9 +199,9 @@ GrepDo(Grep *grep,
                         return ret;
                     }
                 }
-                if (grep->next) {
-                    GrepDo(grep->next, pattern, linenumber, filename, cb);
-                    grep->next = NULL;
+                if ((*grepNode)->next) {
+                    GrepDo((*grepNode)->next, pattern, linenumber, filename, cb);
+                    grepNode = &(*grepNode)->next;
                 } else {
                     return ret;
                 }
