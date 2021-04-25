@@ -23,10 +23,11 @@ GrepFree(Grep *grep)
     }
 
     if (grep->pathList) {
-        while (grep->pathList->next) {
+        while (grep->pathList) {
             GSList *tmp = grep->pathList;
             grep->pathList = grep->pathList->next;
-            free(tmp);
+            g_free(tmp->data);
+            g_slist_free_1(tmp);
         }
     }
 
@@ -38,10 +39,9 @@ GrepFree(Grep *grep)
 }
 
 
-GSList *
-addPaths(GSList *paths,
+static int
+addPaths(GSList **paths,
          const char *path,
-         const char *rootpath,
          int recursive)
 {
     struct stat sb;
@@ -56,9 +56,10 @@ addPaths(GSList *paths,
     }
 
     if (!S_ISDIR(sb.st_mode)) {
-        paths = g_slist_prepend(paths, g_strdup(path));
+        *paths = g_slist_prepend(*paths, g_strdup(path));
     } else {
         const char *f;
+
         if (!recursive) {
             errno = EISDIR;
             perror(path);
@@ -72,20 +73,20 @@ addPaths(GSList *paths,
 
         while ((f = g_dir_read_name(dirp))) {
             g_autofree char *newpath = g_build_filename(path, f, NULL);
-            if ((paths = addPaths(paths, newpath, rootpath, recursive)) == NULL && path == rootpath) {
+
+            if (addPaths(paths, newpath, recursive) < 0)
                 goto error;
-            }
         }
     }
 
     if (dirp)
         g_dir_close(dirp);
-    return paths;
+    return 0;
 
-  error:
+ error:
     if (dirp)
         g_dir_close(dirp);
-    return NULL;
+    return -1;
 }
 
 /**
@@ -109,18 +110,20 @@ GrepInit(int recursive,
         Grep *grep = malloc(sizeof(Grep));
         grep->pathList = NULL;
         grep->next = NULL;
+        GSList **listHead = &grep->pathList;
         char tmp[2] = "-";
         const char *tmp_path = tmp;
-        grep->pathList = addPaths(grep->pathList, tmp_path, tmp_path, recursive);
+        addPaths(listHead, tmp_path, recursive);
         return grep;
     } else if (*paths == NULL && recursive != 0) {
     /* No path given and recursive == 1, grep cur dir  */
         Grep *grep = malloc(sizeof(Grep));
         grep->pathList = NULL;
         grep->next = NULL;
+        GSList **listHead = &grep->pathList;
         char tmp[3] = "./";
         const char *tmp_path = tmp;
-        grep->pathList = addPaths(grep->pathList, tmp_path, tmp_path, recursive);
+        addPaths(listHead, tmp_path, recursive);
         return grep;
     } else {
     /* Normal situation, for every path given, use a grep
@@ -128,9 +131,10 @@ GrepInit(int recursive,
         Grep *grep = malloc(sizeof(Grep) * npaths);
         grep->next = NULL;
         grep->pathList = NULL;
+        GSList **listHead = &grep->pathList;
         Grep *head = grep;
         for (int i = 0; paths[i] != NULL; i++) {
-            grep->pathList = addPaths(grep->pathList, paths[i], paths[i], recursive);
+            addPaths(listHead, paths[i], recursive);
             if (paths[i + 1] != NULL) {
                 Grep *tmp = malloc(sizeof(Grep));
                 tmp->pathList = NULL;
@@ -176,9 +180,10 @@ GrepDo(Grep *grep,
 {
     int ret = -1;
     if (grep && grep->pathList) {
+        GSList **node = &grep->pathList;
         /* Default behaviour */
-        if (!grep->next && !grep->pathList->next && filename != 1) {
-            const char *path = grep->pathList->data;
+        if (!grep->next && !(*node)->next && filename != 1) {
+            const char *path = (*node)->data;
             ret = cb(path, pattern, linenumber, 0);
             return ret;
         } else {
@@ -186,10 +191,10 @@ GrepDo(Grep *grep,
             filename for callback func */
             filename = filename % 2;
             while (grep) {
-                while(grep->pathList) {
-                    const char *path = grep->pathList->data;
+                while(*node) {
+                    const char *path = (*node)->data;
                     ret = cb(path, pattern, linenumber, filename);
-                    grep->pathList = grep->pathList->next;
+                    node = &(*node)->next;
                     if (ret < 0) {
                         return ret;
                     }
