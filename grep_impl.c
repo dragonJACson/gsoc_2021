@@ -8,6 +8,7 @@
 #include "grep_impl.h"
 
 
+
 /**
  * GrepFree:
  * @grep: Grep structure
@@ -22,18 +23,17 @@ GrepFree(Grep *grep)
         return ;
     }
 
-    if (grep->pathList) {
-        while (grep->pathList) {
-            GSList *tmp = grep->pathList;
-            grep->pathList = grep->pathList->next;
-            g_free(tmp->data);
-            g_slist_free_1(tmp);
-        }
-    }
-
     while (grep) {
         Grep *t = grep;
         grep = grep->next;
+        if (t->pathList) {
+            while (t->pathList) {
+                GSList *tmp = t->pathList;
+                t->pathList = t->pathList->next;
+                g_free(tmp->data);
+                g_slist_free_1(tmp);
+            }
+        }
         free(t);
     }
 }
@@ -105,12 +105,7 @@ GrepInit(int recursive,
          const char **paths,
          size_t npaths)
 {
-    /* Though npaths = 0, we still have to store a path
-    like '/dev/stdin' or './' */
-    if (npaths == 0) {
-        npaths = 1;
-    }
-    Grep *grep = malloc(sizeof(Grep) * npaths);
+    Grep *grep = malloc(sizeof(Grep));
     grep->pathList = NULL;
     grep->next = NULL;
     /* No path given and recursive != 1, read from stdin */
@@ -130,11 +125,11 @@ GrepInit(int recursive,
     } else {
     /* Normal situation, for every path given, use a grep
     structure to store the path generated */
-        GSList **listHead = &grep->pathList;
         Grep *head = grep;
-        for (int i = 0; paths[i] != NULL; i++) {
+        for (size_t i = 0; i < npaths; i++) {
+            GSList **listHead = &grep->pathList;
             addPaths(listHead, paths[i], recursive);
-            if (paths[i + 1] != NULL) {
+            if (i != npaths - 1) {
                 Grep *tmp = malloc(sizeof(Grep));
                 tmp->pathList = NULL;
                 tmp->next = NULL;
@@ -200,8 +195,9 @@ GrepDo(Grep *grep,
                     }
                 }
                 if ((*grepNode)->next) {
-                    GrepDo((*grepNode)->next, pattern, linenumber, filename, cb);
                     grepNode = &(*grepNode)->next;
+                    ret = GrepDo(*grepNode, pattern, linenumber, filename, cb);
+                    return ret;
                 } else {
                     return ret;
                 }
